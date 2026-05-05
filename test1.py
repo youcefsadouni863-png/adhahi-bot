@@ -78,8 +78,7 @@ def format_status_message(status, changed=False):
         )
 
 def main():
-    print("🤖 البوت شغّال...")
-    send_telegram_message("✅ البوت بدأ المراقبة - ولاية برج بوعريريج")
+   
 
     last_status = None
     last_report_time = 0
