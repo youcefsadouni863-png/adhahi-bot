@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# ========== Web Server وهمي لـ Render ==========
+# ========== Web Server ==========
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -24,7 +24,7 @@ def run_server():
 
 threading.Thread(target=run_server, daemon=True).start()
 
-# ========== الإعدادات ==========
+# ========== CONFIG ==========
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
@@ -34,35 +34,26 @@ WILAYA_CODE = "34"
 CHECK_INTERVAL = 10 * 60  # 10 دقائق
 SLEEP_TIME = 60  # كل دقيقة
 
-# ================================
 
-
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML"
-    }
+# ========== TELEGRAM ==========
+def send(msg):
     try:
-        requests.post(url, json=payload, timeout=10)
-        print(f"[{datetime.now()}] ✅ رسالة أُرسلت")
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"},
+            timeout=10
+        )
     except Exception as e:
-        print(f"[{datetime.now()}] ❌ خطأ في الإرسال: {e}")
+        print("Telegram error:", e)
 
 
-def get_reservation_status():
+# ========== API ==========
+def get_status():
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json"
-        }
+        r = requests.get(API_URL, timeout=15)
+        r.raise_for_status()
+        data = r.json()
 
-        response = requests.get(API_URL, headers=headers, timeout=15)
-        response.raise_for_status()
-        data = response.json()
-
-        # 🔥 نبحث عن ولاية برج
         for w in data:
             if w.get("wilayaCode") == WILAYA_CODE:
                 return bool(w.get("available"))
@@ -70,62 +61,49 @@ def get_reservation_status():
         return None
 
     except Exception as e:
-        print(f"[{datetime.now()}] ❌ خطأ في جلب البيانات: {e}")
+        print("API error:", e)
         return None
 
 
-def format_status_message(status, changed=False):
-    status_ar = "🟢 مفتوح" if status else "🔴 مغلق"
+# ========== FORMAT ==========
+def format_msg(status, changed=False):
+    s = "🟢 مفتوح" if status else "🔴 مغلق"
 
     if changed:
-        return (
-            f"🚨 <b>تغيّرت حالة الحجز!</b>\n"
-            f"📍 الولاية: برج بوعريريج (34)\n"
-            f"📌 الحالة الجديدة: {status_ar}\n"
-            f"🕐 {datetime.now().strftime('%H:%M:%S - %Y/%m/%d')}"
-        )
+        return f"🚨 تغيّرت الحالة!\n📌 {s}\n🕐 {datetime.now().strftime('%H:%M:%S')}"
     else:
-        return (
-            f"📊 <b>تقرير دوري</b>\n"
-            f"📍 الولاية: برج بوعريريج (34)\n"
-            f"📌 الحالة: {status_ar}\n"
-            f"🕐 {datetime.now().strftime('%H:%M:%S - %Y/%m/%d')}"
-        )
+        return f"📊 الحالة الحالية:\n📌 {s}\n🕐 {datetime.now().strftime('%H:%M:%S')}"
 
 
+# ========== MAIN ==========
 def main():
-    send_telegram_message("🚀 البوت يعمل الآن")
-
     last_status = None
-    last_report_time = 0
+    last_report = 0
 
     while True:
         try:
-            print("checking...")
+            status = get_status()
 
-            current_status = get_reservation_status()
-
-            if current_status is None:
+            if status is None:
                 time.sleep(SLEEP_TIME)
                 continue
 
-            # 🔥 أول تشغيل
+            # أول تشغيل → تقرير فقط
             if last_status is None:
-                send_telegram_message(format_status_message(current_status))
-                last_report_time = time.time()
+                send(format_msg(status))
+                last_report = time.time()
 
-            # 🔥 إذا تغيّرت الحالة
-            elif current_status != last_status:
-                send_telegram_message(format_status_message(current_status, changed=True))
-                last_report_time = time.time()
+            # تغير الحالة → إشعار فوري
+            elif status != last_status:
+                send(format_msg(status, True))
+                last_report = time.time()
 
-            # 🔥 تقرير كل 10 دقائق
-            elif time.time() - last_report_time >= CHECK_INTERVAL:
-                send_telegram_message(format_status_message(current_status))
-                last_report_time = time.time()
+            # تقرير كل 10 دقائق
+            elif time.time() - last_report >= CHECK_INTERVAL:
+                send(format_msg(status))
+                last_report = time.time()
 
-            last_status = current_status
-
+            last_status = status
             time.sleep(SLEEP_TIME)
 
         except Exception as e:
