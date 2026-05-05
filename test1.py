@@ -35,18 +35,11 @@ threading.Thread(target=run_server, daemon=True).start()
 
 # ========== CONFIG ==========
 TOKEN = os.getenv("TOKEN")
-
 API_URL = "https://adhahi.dz/api/v1/public/wilaya-quotas"
-
 CHECK_INTERVAL = 10 * 60
 SLEEP_TIME = 60
 
-# تخزين حالة المستخدم
-users = {}  
-# users[chat_id] = {
-#   "active": True/False,
-#   "wilaya": "34"
-# }
+users = {}
 
 # ========== API ==========
 def get_all_wilayas():
@@ -71,7 +64,6 @@ async def monitor(chat_id, app):
 
     while users.get(chat_id, {}).get("active"):
         wilaya_code = users[chat_id]["wilaya"]
-
         status, name = get_status(wilaya_code)
 
         if status is None:
@@ -81,15 +73,36 @@ async def monitor(chat_id, app):
         now = time.time()
 
         if last_status is None:
-            await app.bot.send_message(chat_id, f"📊 {name}: {'🟢 مفتوح' if status else '🔴 مغلق'}")
+            await app.bot.send_message(
+                chat_id,
+                f"📊 <b>الحالة الحالية</b>\n"
+                f"📍 {name}\n"
+                f"{'🟢 مفتوح' if status else '🔴 مغلق'}\n"
+                f"🕐 {datetime.now().strftime('%H:%M:%S')}",
+                parse_mode="HTML"
+            )
             last_report = now
 
         elif status != last_status:
-            await app.bot.send_message(chat_id, f"🚨 تغيّرت الحالة في {name}: {'🟢 مفتوح' if status else '🔴 مغلق'}")
+            await app.bot.send_message(
+                chat_id,
+                f"🚨 <b>تغيّرت الحالة!</b>\n"
+                f"📍 {name}\n"
+                f"{'🟢 مفتوح الآن' if status else '🔴 مغلق الآن'}\n"
+                f"🕐 {datetime.now().strftime('%H:%M:%S')}",
+                parse_mode="HTML"
+            )
             last_report = now
 
         elif now - last_report >= CHECK_INTERVAL:
-            await app.bot.send_message(chat_id, f"📊 تحديث {name}: {'🟢 مفتوح' if status else '🔴 مغلق'}")
+            await app.bot.send_message(
+                chat_id,
+                f"📊 <b>تقرير دوري</b>\n"
+                f"📍 {name}\n"
+                f"{'🟢 مفتوح' if status else '🔴 مغلق'}\n"
+                f"🕐 {datetime.now().strftime('%H:%M:%S')}",
+                parse_mode="HTML"
+            )
             last_report = now
 
         last_status = status
@@ -97,17 +110,26 @@ async def monitor(chat_id, app):
 
 # ========== COMMANDS ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = []
+    chat_id = update.effective_chat.id
+
+    if users.get(chat_id, {}).get("active"):
+        await update.message.reply_text("⚠️ البوت شغال بالفعل، أوقفه أولاً عبر /stop")
+        return
+
     data = get_all_wilayas()
 
-    # نصنع أزرار لكل ولاية
+    if not data:
+        await update.message.reply_text("❌ خطأ في جلب البيانات، حاول مرة أخرى")
+        return
+
+    keyboard = []
     for w in data:
-        name = w["wilayaNameFr"]
-        code = w["wilayaCode"]
-        keyboard.append([InlineKeyboardButton(name, callback_data=code)])
+        name = w.get("wilayaNameFr", "")
+        code = w.get("wilayaCode", "")
+        if name and code:
+            keyboard.append([InlineKeyboardButton(name, callback_data=code)])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-
     await update.message.reply_text("📍 اختر الولاية:", reply_markup=reply_markup)
 
 
@@ -123,7 +145,10 @@ async def select_wilaya(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "wilaya": wilaya_code
     }
 
-    await query.edit_message_text(f"✅ تم اختيار الولاية: {wilaya_code}\n\nاضغط /run لبدء المراقبة")
+    await query.edit_message_text(
+        f"✅ تم اختيار الولاية: {wilaya_code}\n\n"
+        f"اضغط /run لبدء المراقبة"
+    )
 
 
 async def run(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -138,8 +163,7 @@ async def run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     users[chat_id]["active"] = True
-
-    await update.message.reply_text("🚀 بدأ المراقبة")
+    await update.message.reply_text("🚀 بدأت المراقبة، سيتم إشعارك عند أي تغيير")
 
     context.application.create_task(monitor(chat_id, context.application))
 
@@ -150,20 +174,18 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat_id in users:
         users[chat_id]["active"] = False
 
-    await update.message.reply_text("⛔ تم إيقاف البوت")
-
-# ========== MAIN ==========
-def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(select_wilaya))
-    app.add_handler(CommandHandler("run", run))
-    app.add_handler(CommandHandler("stop", stop))
-
-    print("Bot running...")
-    app.run_polling()
+    await update.message.reply_text("⛔ تم إيقاف المراقبة")
 
 
-if __name__ == "__main__":
-    main()
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+
+    if chat_id not in users:
+        await update.message.reply_text("❗ اختر الولاية أولاً عبر /start")
+        return
+
+    wilaya_code = users[chat_id]["wilaya"]
+    st, name = get_status(wilaya_code)
+
+    if st is None:
+        await update.message.reply_text("❌ خ
