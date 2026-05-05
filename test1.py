@@ -188,4 +188,30 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     st, name = get_status(wilaya_code)
 
     if st is None:
-        await update.message.reply_text("❌ خ
+        await update.message.reply_text("❌ خطأ في جلب البيانات")
+        return
+
+    await update.message.reply_text(
+        f"📊 <b>الحالة الحالية</b>\n"
+        f"📍 {name}\n"
+        f"{'🟢 مفتوح' if st else '🔴 مغلق'}\n"
+        f"🕐 {datetime.now().strftime('%H:%M:%S')}",
+        parse_mode="HTML"
+    )
+
+# ========== MAIN ==========
+def main():
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("run", run))
+    app.add_handler(CommandHandler("stop", stop))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CallbackQueryHandler(select_wilaya))
+
+    print("Bot running...")
+    app.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    main()
