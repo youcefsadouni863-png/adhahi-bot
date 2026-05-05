@@ -1,15 +1,31 @@
 import requests
 import time
+import threading
 import os
 from datetime import datetime
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# ========== الإعدادات ===========
+# ========== Web Server وهمي لـ Render ==========
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running!")
+    def log_message(self, *args):
+        pass
+
+def run_server():
+    server = HTTPServer(("0.0.0.0", 8080), Handler)
+    server.serve_forever()
+
+threading.Thread(target=run_server, daemon=True).start()
+
+# ========== الإعدادات ==========
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 CHECK_INTERVAL = 10 * 60  # 10 دقائق
 
-# رابط API الموقع - عدّله حسب الموقع الفعلي
-API_URL = "https://alachahia.dz/api/wilayas/reservation-status"  # مثال
+API_URL = "https://alachahia.dz/api/wilayas/reservation-status"  # عدّله
 WILAYA_CODE = "34"  # برج بوعريريج
 
 # ================================
@@ -38,7 +54,6 @@ def get_reservation_status():
         response.raise_for_status()
         data = response.json()
 
-        # عدّل هذا حسب هيكل الـ API الفعلي
         status = data.get("status") or data.get("is_open") or data.get("reservation_open")
         return status
     except Exception as e:
@@ -76,18 +91,16 @@ def main():
             time.sleep(60)
             continue
 
-        # إذا تغيّرت الحالة → أرسل فورًا
         if last_status is not None and current_status != last_status:
             send_telegram_message(format_status_message(current_status, changed=True))
             last_report_time = time.time()
 
-        # كل 10 دقائق → أرسل تقرير دوري
         elif time.time() - last_report_time >= CHECK_INTERVAL:
             send_telegram_message(format_status_message(current_status, changed=False))
             last_report_time = time.time()
 
         last_status = current_status
-        time.sleep(60)  # فحص كل دقيقة
+        time.sleep(60)
 
 if __name__ == "__main__":
     main()
