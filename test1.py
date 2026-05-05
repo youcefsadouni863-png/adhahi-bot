@@ -58,43 +58,54 @@ if row is None:
 # ---------------- BOT LOOP ----------------
 def run_bot():
 
-    while True:
-        try:
-            print("checking...")
+ while True:
+    try:
+        data = get_data()
 
-            data = get_data()
+        for w in data:
 
-            for w in data:
-                if w["wilayaCode"] != WILAYA_CODE:
-                    continue
+            if w["wilayaCode"] != WILAYA_CODE:
+                continue
 
-                available = int(w["available"])
-                name = w["wilayaNameFr"]
+            available = int(w["available"])
+            name = w["wilayaNameFr"]
 
-                cur.execute("SELECT available, last_report FROM state WHERE wilaya=?", (WILAYA_CODE,))
-                old, last_report = cur.fetchone()
+            cur.execute("SELECT available, last_report FROM state WHERE wilaya=?", (WILAYA_CODE,))
+            old, last_report = cur.fetchone()
 
-                now = int(time.time())
+            now = int(time.time())
 
-                if old == 0 and available == 1:
-                    send(f"🟢 الحجز أصبح متوفر الآن في: {name}")
+            # 🔥 1. إشعار عند فتح الحجز فقط
+            if old == 0 and available == 1:
+                send(f"🟢 الحجز أصبح متوفر الآن في: {name}")
 
-                if now - last_report >= 250:
-                    status = "🟢 مفتوح" if available else "🔴 مغلق"
-                    send(f"📊 {name}: {status}")
-                    last_report = now
+            # 🔥 2. تقرير كل 10 دقائق (حتى لو مغلق)
+            if now - last_report >= 250:
+                status = "🟢 مفتوح" if available == 1 else "🔴 مغلق"
 
-                cur.execute(
-                    "UPDATE state SET available=?, last_report=? WHERE wilaya=?",
-                    (available, last_report, WILAYA_CODE)
+                time_str = datetime.now().strftime("%H:%M:%S")
+
+                send(
+                    f"📊 حالة الحجز (تحديث دوري)\n"
+                    f"🏙 الولاية: {name}\n"
+                    f"📌 الحالة: {status}\n"
+                    f"⏰ الوقت: {time_str}"
                 )
-                conn.commit()
 
-            time.sleep(15)
+                last_report = now
 
-        except Exception as e:
-            print("Loop error:", e)
-            time.sleep(15)
+            # تحديث الحالة
+            cur.execute(
+                "UPDATE state SET available=?, last_report=? WHERE wilaya=?",
+                (available, last_report, WILAYA_CODE)
+            )
+            conn.commit()
+
+        time.sleep(60)
+
+    except Exception as e:
+        print("Loop error:", e)
+        time.sleep(60)
 
 # ---------------- FLASK ----------------
 app = Flask(__name__)
