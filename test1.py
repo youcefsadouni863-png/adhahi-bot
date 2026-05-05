@@ -25,7 +25,7 @@ TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 CHECK_INTERVAL = 10 * 60  # 10 دقائق
 
-API_URL = "https://alachahia.dz/api/wilayas/reservation-status"  # عدّله
+API_URL = "https://adhahi.dz/api/v1/public/wilaya-quotas"  # عدّله
 WILAYA_CODE = "34"  # برج بوعريريج
 
 # ================================
