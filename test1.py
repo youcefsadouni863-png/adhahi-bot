@@ -2,8 +2,17 @@ import requests
 import time
 import threading
 import os
+import asyncio
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes
+)
 
 # ========== Web Server ==========
 class Handler(BaseHTTPRequestHandler):
@@ -26,89 +35,134 @@ threading.Thread(target=run_server, daemon=True).start()
 
 # ========== CONFIG ==========
 TOKEN = os.getenv("TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
 
 API_URL = "https://adhahi.dz/api/v1/public/wilaya-quotas"
-WILAYA_CODE = "34"
 
-CHECK_INTERVAL = 10 * 60  # 10 دقائق
-SLEEP_TIME = 60  # كل دقيقة
+CHECK_INTERVAL = 10 * 60
+SLEEP_TIME = 60
 
-
-# ========== TELEGRAM ==========
-def send(msg):
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"},
-            timeout=10
-        )
-    except Exception as e:
-        print("Telegram error:", e)
-
+# تخزين حالة المستخدم
+users = {}  
+# users[chat_id] = {
+#   "active": True/False,
+#   "wilaya": "34"
+# }
 
 # ========== API ==========
-def get_status():
+def get_all_wilayas():
     try:
         r = requests.get(API_URL, timeout=15)
         r.raise_for_status()
-        data = r.json()
+        return r.json()
+    except:
+        return []
 
-        for w in data:
-            if w.get("wilayaCode") == WILAYA_CODE:
-                return bool(w.get("available"))
+def get_status(wilaya_code):
+    data = get_all_wilayas()
+    for w in data:
+        if w.get("wilayaCode") == wilaya_code:
+            return bool(w.get("available")), w.get("wilayaNameFr")
+    return None, None
 
-        return None
-
-    except Exception as e:
-        print("API error:", e)
-        return None
-
-
-# ========== FORMAT ==========
-def format_msg(status, changed=False):
-    s = "🟢 مفتوح" if status else "🔴 مغلق"
-
-    if changed:
-        return f"🚨 تغيّرت الحالة!\n📌 {s}\n🕐 {datetime.now().strftime('%H:%M:%S')}"
-    else:
-        return f"📊 الحالة الحالية:\n📌 {s}\n🕐 {datetime.now().strftime('%H:%M:%S')}"
-
-
-# ========== MAIN ==========
-def main():
+# ========== MONITOR ==========
+async def monitor(chat_id, app):
     last_status = None
     last_report = 0
 
-    while True:
-        try:
-            status = get_status()
+    while users.get(chat_id, {}).get("active"):
+        wilaya_code = users[chat_id]["wilaya"]
 
-            if status is None:
-                time.sleep(SLEEP_TIME)
-                continue
+        status, name = get_status(wilaya_code)
 
-            # أول تشغيل → تقرير فقط
-            if last_status is None:
-                send(format_msg(status))
-                last_report = time.time()
+        if status is None:
+            await asyncio.sleep(SLEEP_TIME)
+            continue
 
-            # تغير الحالة → إشعار فوري
-            elif status != last_status:
-                send(format_msg(status, True))
-                last_report = time.time()
+        now = time.time()
 
-            # تقرير كل 10 دقائق
-            elif time.time() - last_report >= CHECK_INTERVAL:
-                send(format_msg(status))
-                last_report = time.time()
+        if last_status is None:
+            await app.bot.send_message(chat_id, f"📊 {name}: {'🟢 مفتوح' if status else '🔴 مغلق'}")
+            last_report = now
 
-            last_status = status
-            time.sleep(SLEEP_TIME)
+        elif status != last_status:
+            await app.bot.send_message(chat_id, f"🚨 تغيّرت الحالة في {name}: {'🟢 مفتوح' if status else '🔴 مغلق'}")
+            last_report = now
 
-        except Exception as e:
-            print("Loop error:", e)
-            time.sleep(SLEEP_TIME)
+        elif now - last_report >= CHECK_INTERVAL:
+            await app.bot.send_message(chat_id, f"📊 تحديث {name}: {'🟢 مفتوح' if status else '🔴 مغلق'}")
+            last_report = now
+
+        last_status = status
+        await asyncio.sleep(SLEEP_TIME)
+
+# ========== COMMANDS ==========
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = []
+    data = get_all_wilayas()
+
+    # نصنع أزرار لكل ولاية
+    for w in data:
+        name = w["wilayaNameFr"]
+        code = w["wilayaCode"]
+        keyboard.append([InlineKeyboardButton(name, callback_data=code)])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text("📍 اختر الولاية:", reply_markup=reply_markup)
+
+
+async def select_wilaya(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    chat_id = query.message.chat.id
+    wilaya_code = query.data
+
+    users[chat_id] = {
+        "active": False,
+        "wilaya": wilaya_code
+    }
+
+    await query.edit_message_text(f"✅ تم اختيار الولاية: {wilaya_code}\n\nاضغط /run لبدء المراقبة")
+
+
+async def run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+
+    if chat_id not in users:
+        await update.message.reply_text("❗ اختر الولاية أولاً عبر /start")
+        return
+
+    if users[chat_id]["active"]:
+        await update.message.reply_text("⚠️ البوت شغال بالفعل")
+        return
+
+    users[chat_id]["active"] = True
+
+    await update.message.reply_text("🚀 بدأ المراقبة")
+
+    context.application.create_task(monitor(chat_id, context.application))
+
+
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+
+    if chat_id in users:
+        users[chat_id]["active"] = False
+
+    await update.message.reply_text("⛔ تم إيقاف البوت")
+
+# ========== MAIN ==========
+def main():
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(select_wilaya))
+    app.add_handler(CommandHandler("run", run))
+    app.add_handler(CommandHandler("stop", stop))
+
+    print("Bot running...")
+    app.run_polling()
 
 
 if __name__ == "__main__":
