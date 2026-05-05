@@ -10,7 +10,7 @@ TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 API = "https://adhahi.dz/api/v1/public/wilaya-quotas"
-WILAYA_CODE = "34"
+WILAYA_CODE = "50"
 
 # ---------------- DB ----------------
 conn = sqlite3.connect("state.db", check_same_thread=False)
