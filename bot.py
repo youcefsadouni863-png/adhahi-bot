@@ -66,6 +66,7 @@ def send(msg):
 
 
 # ---------------- INIT DB ----------------
+send("🚀 البوت يعمل الآن على السيرفر")
 cur.execute("SELECT * FROM state WHERE wilaya=?", (WILAYA_CODE,))
 row = cur.fetchone()
 
