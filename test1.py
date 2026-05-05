@@ -1,117 +1,92 @@
 import requests
-import os
 import time
-import sqlite3
-import threading
 from datetime import datetime
-from flask import Flask
 
+# ========== الإعدادات ===========
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
+CHECK_INTERVAL = 10 * 60  # 10 دقائق
 
-API = "https://adhahi.dz/api/v1/public/wilaya-quotas"
-WILAYA_CODE = "34"
+# رابط API الموقع - عدّله حسب الموقع الفعلي
+API_URL = "https://alachahia.dz/api/wilayas/reservation-status"  # مثال
+WILAYA_CODE = "34"  # برج بوعريريج
 
-# ---------------- DB ----------------
-conn = sqlite3.connect("state.db", check_same_thread=False)
-cur = conn.cursor()
+# ================================
 
-cur.execute("""
-CREATE TABLE IF NOT EXISTS state (
-    wilaya TEXT PRIMARY KEY,
-    available INTEGER,
-    last_report INTEGER
-)
-""")
-conn.commit()
-
-# ---------------- TELEGRAM ----------------
-def send(msg):
+def send_telegram_message(message):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML"
+    }
     try:
-        requests.get(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            params={"chat_id": CHAT_ID, "text": msg}
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        print(f"[{datetime.now()}] ✅ رسالة أُرسلت")
+    except Exception as e:
+        print(f"[{datetime.now()}] ❌ خطأ في الإرسال: {e}")
+
+def get_reservation_status():
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json"
+        }
+        response = requests.get(API_URL, headers=headers, timeout=15, params={"wilaya": WILAYA_CODE})
+        response.raise_for_status()
+        data = response.json()
+
+        # عدّل هذا حسب هيكل الـ API الفعلي
+        status = data.get("status") or data.get("is_open") or data.get("reservation_open")
+        return status
+    except Exception as e:
+        print(f"[{datetime.now()}] ❌ خطأ في جلب البيانات: {e}")
+        return None
+
+def format_status_message(status, changed=False):
+    status_ar = "🟢 مفتوح" if status else "🔴 مغلق"
+    if changed:
+        return (
+            f"🚨 <b>تغيّرت حالة الحجز!</b>\n"
+            f"📍 الولاية: برج بوعريريج (34)\n"
+            f"📌 الحالة الجديدة: {status_ar}\n"
+            f"🕐 الوقت: {datetime.now().strftime('%H:%M:%S - %Y/%m/%d')}"
         )
-    except Exception as e:
-        print("Telegram error:", e)
+    else:
+        return (
+            f"📊 <b>تقرير دوري - حالة الحجز</b>\n"
+            f"📍 الولاية: برج بوعريريج (34)\n"
+            f"📌 الحالة: {status_ar}\n"
+            f"🕐 الوقت: {datetime.now().strftime('%H:%M:%S - %Y/%m/%d')}"
+        )
 
-# ---------------- API ----------------
-def get_data():
-    try:
-        r = requests.get(API, timeout=10)
-        return r.json()
-    except Exception as e:
-        print("API Error:", e)
-        return []
+def main():
+    print("🤖 البوت شغّال...")
+    send_telegram_message("✅ البوت بدأ المراقبة - ولاية برج بوعريريج")
 
-# ---------------- INIT ----------------
-cur.execute("SELECT * FROM state WHERE wilaya=?", (WILAYA_CODE,))
-row = cur.fetchone()
+    last_status = None
+    last_report_time = 0
 
-if row is None:
-    cur.execute(
-        "INSERT INTO state VALUES (?,?,?)",
-        (WILAYA_CODE, 0, int(time.time()))
-    )
-    conn.commit()
+    while True:
+        current_status = get_reservation_status()
 
-# ---------------- BOT LOOP ----------------
-
-while True:
-    try:
-        data = get_data()
-
-        for w in data:
-
-            if w["wilayaCode"] != WILAYA_CODE:
-                continue
-        
-
-                available = int(w["available"])
-                name = w["wilayaNameFr"]
-
-                cur.execute("SELECT available, last_report FROM state WHERE wilaya=?", (WILAYA_CODE,))
-                old, last_report = cur.fetchone()
-
-                now = int(time.time())
-
-                if old == 0 and available == 1:
-                    send(f"🟢 الحجز أصبح متوفر الآن في: {name}")
-
-                if now - last_report >= 250:
-                    status = "🟢 مفتوح" if available==1 else "🔴 مغلق"
-                    time_str= datetime.now().strftime("%H:%M:%S")
-                    send(
-                        f"📊 حالة الحجز (تحديث دوري)\n"
-                        f"🏙 الولاية: {name}\n"
-                        f"📌 الحالة: {status}\n"
-                        f"⏰ الوقت: {time_str}"
-                )
-                    last_report = now
-
-                cur.execute(
-                    "UPDATE state SET available=?, last_report=? WHERE wilaya=?",
-                    (available, last_report, WILAYA_CODE)
-                )
-                conn.commit()
-
+        if current_status is None:
             time.sleep(60)
+            continue
 
-        except Exception as e:
-            print("Loop error:", e)
-            time.sleep(60)
+        # إذا تغيّرت الحالة → أرسل فورًا
+        if last_status is not None and current_status != last_status:
+            send_telegram_message(format_status_message(current_status, changed=True))
+            last_report_time = time.time()
 
-# ---------------- FLASK ----------------
-app = Flask(__name__)
+        # كل 10 دقائق → أرسل تقرير دوري
+        elif time.time() - last_report_time >= CHECK_INTERVAL:
+            send_telegram_message(format_status_message(current_status, changed=False))
+            last_report_time = time.time()
 
-@app.route("/")
-def home():
-    return "Bot running"
+        last_status = current_status
+        time.sleep(60)  # فحص كل دقيقة
 
-# تشغيل البوت في الخلفية
-threading.Thread(target=run_bot).start()
-
-# تشغيل السيرفر (مهم)
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    main()
