@@ -47,15 +47,15 @@ def get_status(wilaya_code):
 
 # 🟢 مراقبة الحالة
 def check_status(user_id):
+    print(f"🧵 Thread started for user {user_id}")  # أضف هذا
     while users.get(user_id, {}).get("running", False):
         wilaya_code = users[user_id]["wilaya"]
-
+        print(f"🔍 Checking wilaya: {wilaya_code}")  # أضف هذا
         new_status = get_status(wilaya_code)
+        print(f"📊 Got status: {new_status}")  # أضف هذا
         old_status = users[user_id]["last_status"]
-
         if new_status and new_status != old_status:
             users[user_id]["last_status"] = new_status
-
             try:
                 bot.send_message(
                     chat_id=user_id,
@@ -63,8 +63,8 @@ def check_status(user_id):
                 )
             except Exception as e:
                 print("SEND ERROR:", e)
-
-        time.sleep(600)  # 10 دقائق
+        time.sleep(600)
+    print(f"🛑 Thread stopped for user {user_id}")  # أضف هذا
 
 
 # 🟢 Webhook
@@ -100,7 +100,10 @@ def webhook():
                     "last_status": None,
                     "running": True
                 }
-
+                print(f"✅ User {user_id} selected {text}, starting thread...")  # ← أضف
+                t = threading.Thread(target=check_status, args=(user_id,), daemon=True)
+                t.start()
+                print(f"🧵 Thread alive: {t.is_alive()}")  # ← أضف
                 bot.send_message(
                     chat_id=user_id,
                     text=f"تم اختيار {text} ✅"
