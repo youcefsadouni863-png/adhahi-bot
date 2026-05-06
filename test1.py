@@ -20,13 +20,7 @@ API_URL = "https://adhahi.dz/api/v1/public/wilaya-quotas"
 users = {}
 
 # الولايات
-wilayas = {
-    "الجزائر": "16",
-    "برج بوعريريج": "34",
-    "سطيف": "19",
-    "قسنطينة": "25",
-    "وهران": "31"
-}
+WILAYA_CODE = "34"
 
 
 # 🟢 جلب الحالة
