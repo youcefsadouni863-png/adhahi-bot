@@ -29,16 +29,19 @@ wilayas = {
 # 🟢 جلب الحالة
 def get_status(wilaya_code):
     try:
+        print(f"🔍 جاري جلب البيانات... URL: {API_URL}")
         res = requests.get(API_URL, timeout=10)
+        print(f"✅ Status Code: {res.status_code}")
+        print(f"📄 Response: {res.text[:300]}")
         data = res.json()
-
+        print(f"📦 Data keys: {data.keys()}")
         for w in data.get("data", []):
+            print(f"  - code: {w.get('code')} | status: {w.get('status')}")
             if w["code"] == wilaya_code:
                 return w["status"]
-
+        print(f"⚠️ الولاية {wilaya_code} ما وُجدت في البيانات")
     except Exception as e:
-        print("API ERROR:", e)
-
+        print(f"❌ API ERROR: {type(e).__name__}: {e}")
     return None
 
 
