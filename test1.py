@@ -65,7 +65,7 @@ def check_status(user_id):
 
 
 # 🟢 Webhook
-@app.route(f"/{TOKEN}", methods=["POST"])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     try:
         update = Update.de_json(request.get_json(force=True), bot)
