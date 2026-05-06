@@ -6,7 +6,7 @@ from flask import Flask, request
 from telegram import Bot, Update
 
 # 🔐 التوكن من environment
-TOKEN = os.environ.get("BOT_TOKEN")
+TOKEN = os.environ.get("TOKEN")
 
 bot = Bot(token=TOKEN)
 app = Flask(__name__)
