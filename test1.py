@@ -7,6 +7,7 @@ from telegram import Bot, Update
 
 # 🔐 التوكن من environment
 TOKEN = os.getenv("TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
 bot = Bot(token=TOKEN)
 app = Flask(__name__)
@@ -27,105 +28,120 @@ wilayas = {
 
 
 # 🟢 جلب الحالة
-def get_status(wilaya_code):
+conn = sqlite3.connect("state.db", check_same_thread=False)
+cur = conn.cursor()
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS state (
+    wilaya TEXT PRIMARY KEY,
+    available INTEGER,
+    last_report INTEGER
+)
+""")
+conn.commit()
+
+
+# ---------------- SAFE API CALL ----------------
+def get_data():
     try:
-        print(f"🔍 جاري جلب البيانات... URL: {API_URL}")
-        res = requests.get(API_URL, timeout=10)
-        print(f"✅ Status Code: {res.status_code}")
-        print(f"📄 Response: {res.text[:300]}")
-        data = res.json()
-        print(f"📦 Data keys: {data.keys()}")
-        for w in data.get("data", []):
-            print(f"  - code: {w.get('code')} | status: {w.get('status')}")
-            if w["code"] == wilaya_code:
-                return w["status"]
-        print(f"⚠️ الولاية {wilaya_code} ما وُجدت في البيانات")
-    except Exception as e:
-        print(f"❌ API ERROR: {type(e).__name__}: {e}")
-    return None
+        r = requests.get(
+            API,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json",
+                "Referer": "https://adhahi.dz/"
+            },
+            timeout=10
+        )
 
+        if r.status_code != 200:
+            print("HTTP Error:", r.status_code)
+            return []
 
-# 🟢 مراقبة الحالة
-def check_status(user_id):
-    print(f"🧵 Thread started for user {user_id}")  # أضف هذا
-    while users.get(user_id, {}).get("running", False):
-        wilaya_code = users[user_id]["wilaya"]
-        print(f"🔍 Checking wilaya: {wilaya_code}")  # أضف هذا
-        new_status = get_status(wilaya_code)
-        print(f"📊 Got status: {new_status}")  # أضف هذا
-        old_status = users[user_id]["last_status"]
-        if new_status and new_status != old_status:
-            users[user_id]["last_status"] = new_status
-            try:
-                bot.send_message(
-                    chat_id=user_id,
-                    text=f"🔔 تغيرت الحالة:\n{new_status}"
-                )
-            except Exception as e:
-                print("SEND ERROR:", e)
-        time.sleep(600)
-    print(f"🛑 Thread stopped for user {user_id}")  # أضف هذا
+        if not r.text.strip():
+            print("Empty response")
+            return []
 
-
-# 🟢 Webhook
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    try:
-        data = request.get_json(force=True)
-        print(f"📩 RAW DATA: {data}")  # ← أضف هذا أول شيء
-        update = Update.de_json(request.get_json(force=True), bot)
-
-        if update.message:
-            user_id = update.message.chat_id
-            text = update.message.text
-            print(f"👤 user_id: {user_id} | text: '{text}'")  # ← أضف هذا
-            print(f"📋 wilayas keys: {list(wilayas.keys())}")  # ← أضف هذا
-
-            # /start
-            if text == "/start":
-                keyboard = "\n".join(wilayas.keys())
-                bot.send_message(
-                    chat_id=user_id,
-                    text=f"اختر الولاية:\n{keyboard}"
-                )
-
-            # /stop
-            elif text == "/stop":
-                if user_id in users:
-                    users[user_id]["running"] = False
-                    bot.send_message(chat_id=user_id, text="تم الإيقاف ⛔")
-                else:
-                    bot.send_message(chat_id=user_id, text="البوت غير مفعل")
-
-            # اختيار ولاية
-            elif text in wilayas:
-                users[user_id] = {
-                    "wilaya": wilayas[text],
-                    "last_status": None,
-                    "running": True
-                }
-                print(f"✅ User {user_id} selected {text}, starting thread...")  # ← أضف
-                t = threading.Thread(target=check_status, args=(user_id,), daemon=True)
-                t.start()
-                print(f"🧵 Thread alive: {t.is_alive()}")  # ← أضف
-                bot.send_message(
-                    chat_id=user_id,
-                    text=f"تم اختيار {text} ✅"
-                )
-
-                threading.Thread(
-                    target=check_status,
-                    args=(user_id,),
-                    daemon=True
-                ).start()
-
-            else:
-                bot.send_message(chat_id=user_id, text="أمر غير معروف")
+        return r.json()
 
     except Exception as e:
-        print("WEBHOOK ERROR:", e)
+        print("API Error:", e)
+        return []
 
-    return "ok"
+
+# ---------------- TELEGRAM ----------------
+def send(msg):
+    try:
+        requests.get(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            params={"chat_id": CHAT_ID, "text": msg}
+        )
+    except Exception as e:
+        print("Telegram error:", e)
+
+
+# ---------------- INIT DB ----------------
+cur.execute("SELECT * FROM state WHERE wilaya=?", (WILAYA_CODE,))
+row = cur.fetchone()
+
+if row is None:
+    cur.execute(
+        "INSERT INTO state VALUES (?,?,?)",
+        (WILAYA_CODE, 0, int(time.time()))
+    )
+    conn.commit()
+
+
+
+# ---------------- LOOP ----------------
+while True:
+    try:
+        data = get_data()
+
+        for w in data:
+
+            if w["wilayaCode"] != WILAYA_CODE:
+                continue
+
+            available = int(w["available"])
+            name = w["wilayaNameFr"]
+
+            cur.execute("SELECT available, last_report FROM state WHERE wilaya=?", (WILAYA_CODE,))
+            old, last_report = cur.fetchone()
+
+            now = int(time.time())
+
+            # 🔥 1. إشعار عند فتح الحجز فقط
+            if old == 0 and available == 1:
+                send(f"🟢 الحجز أصبح متوفر الآن في: {name}")
+
+            # 🔥 2. تقرير كل 10 دقائق (حتى لو مغلق)
+            if now - last_report >= 250:
+                status = "🟢 مفتوح" if available == 1 else "🔴 مغلق"
+
+                time_str = datetime.now().strftime("%H:%M:%S")
+
+                send(
+                    f"📊 حالة الحجز (تحديث دوري)\n"
+                    f"🏙 الولاية: {name}\n"
+                    f"📌 الحالة: {status}\n"
+                    f"⏰ الوقت: {time_str}"
+                )
+
+                last_report = now
+
+            # تحديث الحالة
+            cur.execute(
+                "UPDATE state SET available=?, last_report=? WHERE wilaya=?",
+                (available, last_report, WILAYA_CODE)
+            )
+            conn.commit()
+
+        time.sleep(60)
+
+    except Exception as e:
+        print("Loop error:", e)
+        time.sleep(60)
 
 
 # 🟢 route اختبار
