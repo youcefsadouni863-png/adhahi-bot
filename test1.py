@@ -71,11 +71,15 @@ def check_status(user_id):
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
+        data = request.get_json(force=True)
+        print(f"📩 RAW DATA: {data}")  # ← أضف هذا أول شيء
         update = Update.de_json(request.get_json(force=True), bot)
 
         if update.message:
             user_id = update.message.chat_id
             text = update.message.text
+            print(f"👤 user_id: {user_id} | text: '{text}'")  # ← أضف هذا
+            print(f"📋 wilayas keys: {list(wilayas.keys())}")  # ← أضف هذا
 
             # /start
             if text == "/start":
